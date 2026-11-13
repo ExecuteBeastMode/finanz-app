@@ -22,12 +22,14 @@ button{font:inherit;color:inherit;border:0;cursor:pointer}
 .ic{background:var(--card);width:40px;height:40px;border-radius:12px;font-size:18px}
 .bal{background:linear-gradient(135deg,#2b3a8f,#6c8cff);border-radius:20px;padding:20px;margin-bottom:12px}
 .bal small{opacity:.8}.bal b{display:block;font-size:34px;margin-top:4px}
+.bal.neg b{color:#ffd0d5}
 .budget{background:var(--card);border-radius:16px;padding:14px;margin-bottom:12px;display:grid;gap:10px}
 .budget label{color:var(--mut);font-size:14px}
+.budget .reset{background:var(--line);padding:10px;border-radius:10px;font-size:14px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
 .box{background:var(--card);border-radius:16px;padding:14px}
 .box small{color:var(--mut)}.box b{display:block;font-size:20px;margin-top:2px}
-.in{color:var(--in)}.out{color:var(--out)}
+.out{color:var(--out)}
 h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin:20px 0 8px}
 .bar{margin:8px 0}.bar div:first-child{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px}
 .track{height:8px;background:var(--line);border-radius:8px;overflow:hidden}.fill{height:100%;background:var(--acc);border-radius:8px}
@@ -51,17 +53,15 @@ input,select{width:100%;background:var(--bg);color:var(--tx);border:1px solid va
 .fix .top b{display:block}
 .fix .top small{color:var(--mut)}
 .fix .amt{font-weight:700;color:var(--out)}
-.check{display:flex;align-items:center;gap:10px;margin-top:12px;background:var(--bg);border-radius:12px;padding:12px}
-.check input{width:22px;height:22px;accent-color:var(--ok)}
-.check label{flex:1;font-weight:600}
-.check .paid{color:var(--ok);font-size:13px}
+.status{margin-top:10px;font-size:13px;padding:10px;border-radius:10px;background:var(--bg)}
+.status.due{color:#ffb020}.status.paid{color:var(--ok)}
 </style></head><body>
 <main>
 <div class="tabs"><button class="on" id="tabOverview">Übersicht</button><button id="tabFixed">Fixkosten</button></div>
 <div id="overview">
 <div class="nav"><button class="ic" id="prev">‹</button><h1 id="mon"></h1><button class="ic" id="next">›</button></div>
-<div class="bal"><small>Verfügbares Budget</small><b id="bal"></b></div>
-<div class="budget"><label for="budget">Monatliches Budget (wird jeden Monat auf 0 zurückgesetzt)</label><input id="budget" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Budget in € eingeben"></div>
+<div class="bal" id="balBox"><small>Verfügbares Budget</small><b id="bal"></b></div>
+<div class="budget"><label for="budget">Monatliches Budget (wird jeden Monat auf 0 zurückgesetzt)</label><input id="budget" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Budget in € eingeben"><button class="reset" id="resetBudget">Budget auf 0 zurücksetzen</button></div>
 <div class="row2"><div class="box"><small>Budget</small><b id="budgetSum"></b></div><div class="box"><small>Ausgaben</small><b class="out" id="exp"></b></div></div>
 <h2>Ausgaben nach Kategorie</h2><div id="cats"></div>
 <h2>Buchungen</h2><div id="list"></div>
@@ -86,7 +86,7 @@ input,select{width:100%;background:var(--bg);color:var(--tx);border:1px solid va
 <input id="fAmt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Betrag in €" required>
 <input id="fPayer" placeholder="Wer bucht ab? z. B. Spotify, Vermieter" required>
 <input id="fReason" placeholder="Grund, z. B. Musik-Abo" required>
-<input id="fDue" type="date">
+<input id="fDue" type="date" required>
 <button class="save">Fixkosten speichern</button><button type="button" class="link" id="fixCancel">Abbrechen</button>
 </form></div>
 <script>
@@ -99,35 +99,50 @@ const saveFix=()=>localStorage.setItem(FK,JSON.stringify(fix));
 const saveBudget=()=>localStorage.setItem(BK,JSON.stringify(budget));
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ym=()=>m.toISOString().slice(0,7);
+const today=()=>new Date().toISOString().slice(0,10);
 function ensureBudget(){if(budget.month!==ym()){budget={month:ym(),amount:0};saveBudget()}$('budget').value=budget.amount||''}
+function autoBook(){
+ const t=today(),y=ym();
+ fix.forEach(f=>{
+  f.paidMonths=f.paidMonths||[];
+  if(f.due&&f.due<=t&&!f.paidMonths.includes(y)){
+   const tid=Date.now()+Math.floor(Math.random()*1000);
+   tx.push({id:tid,type:'out',amt:f.amt,cat:'Fixkosten',date:f.due,note:f.reason+' · '+f.payer});
+   f.paidMonths.push(y);f.lastTxId=tid;
+  }
+ });
+ save();saveFix();
+}
 function render(){
- ensureBudget();
+ ensureBudget();autoBook();
  $('mon').textContent=m.toLocaleDateString('de-DE',{month:'long',year:'numeric'});
  const t=tx.filter(x=>x.date.startsWith(ym())).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
  const o=t.filter(x=>x.type=='out').reduce((s,x)=>s+x.amt,0);
- $('budgetSum').textContent=eur(budget.amount||0);$('exp').textContent=eur(o);$('bal').textContent=eur((budget.amount||0)-o);
+ const free=(budget.amount||0)-o;
+ $('budgetSum').textContent=eur(budget.amount||0);$('exp').textContent=eur(o);$('bal').textContent=eur(free);
+ $('balBox').classList.toggle('neg',free<0);
  const g={};t.filter(x=>x.type=='out').forEach(x=>g[x.cat]=(g[x.cat]||0)+x.amt);
  const e=Object.entries(g).sort((a,b)=>b[1]-a[1]);
- $('cats').innerHTML=e.length?e.map(([k,v])=>`<div class="bar"><div><span>${esc(k)}</span><span>${eur(v)}</span></div><div class="track"><div class="fill" style="width:${budget.amount?v/budget.amount*100:0}%"></div></div></div>`).join(''):'<div class="empty">Keine Ausgaben</div>';
- $('list').innerHTML=t.length?t.map(x=>`<div class="item"><div class="d"><div>${esc(x.cat)}${x.note?' · '+esc(x.note):''}</div><small>${new Date(x.date).toLocaleDateString('de-DE')}</small></div><b class="${x.type}">${x.type=='in'?'+':'−'}${eur(x.amt)}</b><button class="x" data-id="${x.id}">✕</button></div>`).join(''):'<div class="empty">Noch keine Buchungen. Tippe auf +</div>';
+ $('cats').innerHTML=e.length?e.map(([k,v])=>`<div class="bar"><div><span>${esc(k)}</span><span>${eur(v)}</span></div><div class="track"><div class="fill" style="width:${budget.amount?Math.min(100,v/budget.amount*100):0}%"></div></div></div>`).join(''):'<div class="empty">Keine Ausgaben</div>';
+ $('list').innerHTML=t.length?t.map(x=>`<div class="item"><div class="d"><div>${esc(x.cat)}${x.note?' · '+esc(x.note):''}</div><small>${new Date(x.date).toLocaleDateString('de-DE')}</small></div><b class="out">−${eur(x.amt)}</b><button class="x" data-id="${x.id}">✕</button></div>`).join(''):'<div class="empty">Noch keine Buchungen. Tippe auf +</div>';
  const y=ym();const paid=fix.filter(x=>x.paidMonths&&x.paidMonths.includes(y));
  $('fixSum').textContent=eur(paid.reduce((s,x)=>s+x.amt,0));
- $('fixList').innerHTML=fix.length?fix.map(x=>{const p=x.paidMonths&&x.paidMonths.includes(y);return `<div class="fix"><div class="top"><div class="d"><b>${esc(x.reason)}</b><small>${esc(x.payer)}${x.due?' · fällig '+new Date(x.due).toLocaleDateString('de-DE'):''}</small></div><span class="amt">−${eur(x.amt)}</span><button class="x" data-fix="${x.id}">✕</button></div><div class="check"><input type="checkbox" data-check="${x.id}" ${p?'checked':''} id="c${x.id}"><label for="c${x.id}">Diesen Monat bezahlt</label>${p?'<span class="paid">Vom Budget abgezogen</span>':''}</div></div>`}).join(''):'<div class="empty">Noch keine Fixkosten. Tippe auf +</div>';
+ $('fixList').innerHTML=fix.length?fix.map(x=>{const p=x.paidMonths&&x.paidMonths.includes(y);const due=x.due?new Date(x.due).toLocaleDateString('de-DE'):'';return `<div class="fix"><div class="top"><div class="d"><b>${esc(x.reason)}</b><small>${esc(x.payer)}${due?' · Buchung am '+due:''}</small></div><span class="amt">−${eur(x.amt)}</span><button class="x" data-fix="${x.id}">✕</button></div><div class="status ${p?'paid':'due'}">${p?'Automatisch gebucht · vom Budget abgezogen':'Wird am '+due+' automatisch vom Budget abgezogen'}</div></div>`}).join(''):'<div class="empty">Noch keine Fixkosten. Tippe auf +</div>';
 }
 function setType(t){type=t;$('bo').classList.toggle('on',t=='out');$('bi').classList.toggle('on',t=='in');$('cat').innerHTML=C[t].map(c=>`<option>${c}</option>`).join('')}
 $('bo').onclick=()=>setType('out');$('bi').onclick=()=>setType('in');
 $('budget').oninput=e=>{budget.amount=parseFloat(e.target.value)||0;budget.month=ym();saveBudget();render()};
-$('add').onclick=()=>{setType('out');$('date').value=new Date().toISOString().slice(0,10);$('sheet').classList.add('on');$('amt').focus()};
+$('resetBudget').onclick=()=>{if(confirm('Budget wirklich auf 0 zurücksetzen? Bereits gebuchte Fixkosten und Ausgaben bleiben erhalten und werden beim neuen Budget automatisch gegengerechnet.')){budget.amount=0;budget.month=ym();saveBudget();render()}};
+$('add').onclick=()=>{setType('out');$('date').value=today();$('sheet').classList.add('on');$('amt').focus()};
 $('cancel').onclick=()=>$('sheet').classList.remove('on');
 $('f').onsubmit=e=>{e.preventDefault();tx.push({id:Date.now(),type,amt:parseFloat($('amt').value),cat:$('cat').value,date:$('date').value,note:$('note').value.trim()});save();$('f').reset();$('sheet').classList.remove('on');m=new Date($('date').value||Date.now());m.setDate(1);render()};
 $('list').onclick=e=>{const id=e.target.dataset.id;if(id&&confirm('Buchung löschen?')){tx=tx.filter(x=>x.id!=id);save();render()}};
 $('prev').onclick=()=>{m.setMonth(m.getMonth()-1);render()};$('next').onclick=()=>{m.setMonth(m.getMonth()+1);render()};
 $('csv').onclick=()=>{const r=['Datum;Typ;Kategorie;Betrag;Notiz',...tx.map(x=>[x.date,x.type=='in'?'Einnahme':'Ausgabe',x.cat,String(x.amt).replace('.',','),'"'+x.note.replace(/"/g,'""')+'"'].join(';'))];const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+r.join('\n')],{type:'text/csv'}));a.download='finanzen.csv';a.click()};
-$('addFix').onclick=()=>{$('fDue').value='';$('fixSheet').classList.add('on');$('fAmt').focus()};
+$('addFix').onclick=()=>{$('fDue').value=today();$('fixSheet').classList.add('on');$('fAmt').focus()};
 $('fixCancel').onclick=()=>$('fixSheet').classList.remove('on');
 $('ff').onsubmit=e=>{e.preventDefault();fix.push({id:Date.now(),amt:parseFloat($('fAmt').value),payer:$('fPayer').value.trim(),reason:$('fReason').value.trim(),due:$('fDue').value,paidMonths:[]});saveFix();$('ff').reset();$('fixSheet').classList.remove('on');render()};
-$('fixList').onclick=e=>{const id=e.target.dataset.fix;if(id&&confirm('Fixkosten löschen?')){fix=fix.filter(x=>x.id!=id);saveFix();render()}};
-$('fixList').onchange=e=>{const id=e.target.dataset.check;if(!id)return;const f=fix.find(x=>x.id==id);if(!f)return;f.paidMonths=f.paidMonths||[];const y=ym();if(e.target.checked){if(!f.paidMonths.includes(y)){const tid=Date.now();tx.push({id:tid,type:'out',amt:f.amt,cat:'Fixkosten',date:new Date().toISOString().slice(0,10),note:f.reason+' · '+f.payer});f.paidMonths.push(y);f.lastTxId=tid}}else{if(f.lastTxId)tx=tx.filter(x=>x.id!=f.lastTxId);f.paidMonths=f.paidMonths.filter(x=>x!==y);f.lastTxId=null}save();saveFix();render()};
+$('fixList').onclick=e=>{const id=e.target.dataset.fix;if(id&&confirm('Fixkosten löschen? Bereits automatisch gebuchte Ausgabe wird ebenfalls entfernt.')){const f=fix.find(x=>x.id==id);if(f&&f.lastTxId)tx=tx.filter(x=>x.id!=f.lastTxId);fix=fix.filter(x=>x.id!=id);save();saveFix();render()}};
 $('tabOverview').onclick=()=>{$('tabOverview').classList.add('on');$('tabFixed').classList.remove('on');$('overview').style.display='';$('fixed').style.display='none';$('add').style.display=''};
 $('tabFixed').onclick=()=>{$('tabFixed').classList.add('on');$('tabOverview').classList.remove('on');$('fixed').style.display='';$('overview').style.display='none';$('add').style.display='none'};
 render();
